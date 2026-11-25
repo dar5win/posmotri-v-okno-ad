@@ -1,6 +1,8 @@
 /* КОНФИГ */
 const preloaderWaitindTime = 1200;
 const cardsOnPage = 5;
+const videoReadyTimeout = 3000;
+const videoRequestTimeout = 7000;
 const BASE_URL = 'https://v-content.ffapi.ru';
 const endpoint = `${BASE_URL}/api/videos?pagination[pageSize]=${cardsOnPage}&`;
 
@@ -59,7 +61,7 @@ form.onsubmit = (e) => {
 
 async function mainMechanics(endpoint) {
   try {
-    const data = await (await fetch(endpoint)).json();
+    const data = await fetchVideoData(endpoint);
     cardsOnPageState = data.results;
 
     if (!data?.results?.[0]) {
@@ -129,11 +131,32 @@ async function delay(ms) {
   });
 }
 
-// Промис, который резолвится, если видео целиком готово к проинрыванию без пауз
+async function fetchVideoData(url) {
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(videoRequestTimeout),
+  });
+  if (!response.ok) {
+    throw new Error(`Ошибка запроса: ${response.status}`);
+  }
+  return response.json();
+}
 
-async function waitForReadyVideo(video) {
-  return await new Promise((resolve) => {
-    video.oncanplaythrough = resolve;
+function waitForReadyVideo(video) {
+  if (video.error || video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    function finish() {
+      clearTimeout(timer);
+      video.removeEventListener('canplay', finish);
+      video.removeEventListener('error', finish);
+      resolve();
+    }
+
+    const timer = setTimeout(finish, videoReadyTimeout);
+    video.addEventListener('canplay', finish);
+    video.addEventListener('error', finish);
   });
 }
 
@@ -276,7 +299,7 @@ function showMoreCards({
     let currentPage = dataArray.pagination.page;
     let urlToFetch = `${initialEndpoint}pagination[page]=${(currentPage += 1)}&`;
     try {
-      let data = await (await fetch(urlToFetch)).json();
+      const data = await fetchVideoData(urlToFetch);
       buttonInDOM.remove();
       cardsOnPageState = cardsOnPageState.concat(data.results);
       appendCards({
